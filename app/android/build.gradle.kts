@@ -3,6 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
   alias(libs.plugins.androidApplication)
   alias(libs.plugins.composeCompiler)
+  alias(libs.plugins.kotlinx.serialization)
 }
 
 
@@ -90,5 +91,7 @@ dependencies {
   implementation(projects.library.sqlite)
   implementation(projects.library.server)
   implementation(libs.androidx.activity.compose)
+  implementation(libs.androidx.webkit)
+  implementation(libs.kotlinx.serialization.json)
   debugImplementation(libs.compose.uiTooling)
 }

@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -64,10 +65,11 @@ import com.linroid.ketch.app.ui.toolbar.countTasksByFilter
 fun AppShell(
   instanceManager: InstanceManager,
   embeddedAiProvider: AiDiscoveryProvider? = null,
+  onOpenBrowser: ((String?) -> Unit)? = null,
 ) {
   val scope = rememberCoroutineScope()
   val appState = remember(instanceManager) {
-    AppState(instanceManager, scope, embeddedAiProvider)
+    AppState(instanceManager, scope, embeddedAiProvider, onOpenBrowser)
   }
 
   val instances by appState.instances.collectAsState()
@@ -245,6 +247,16 @@ fun AppShell(
                   Icon(
                     Icons.Filled.AutoAwesome,
                     contentDescription = "AI Discover",
+                  )
+                }
+                IconButton(
+                  onClick = {
+                    appState.requestOpenBrowser()
+                  },
+                ) {
+                  Icon(
+                    Icons.Filled.Public,
+                    contentDescription = "Browser",
                   )
                 }
                 BatchActionBar(

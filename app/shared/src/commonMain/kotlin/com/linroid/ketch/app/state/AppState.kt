@@ -60,6 +60,7 @@ class AppState(
   val instanceManager: InstanceManager,
   private val scope: CoroutineScope,
   private val embeddedAiProvider: AiDiscoveryProvider? = null,
+  private val onOpenBrowser: ((String?) -> Unit)? = null,
 ) {
   private val lanServerDiscovery = LanServerDiscovery()
 
@@ -122,6 +123,21 @@ class AppState(
       showAddDialog = true
     }
   }
+
+  /**
+   * Handle the "Browser" action. The in-app browser is currently
+   * Android-only (see `BrowserActivity`); on platforms that don't
+   * supply [onOpenBrowser], surface the same error banner used
+   * elsewhere rather than showing a dead button.
+   */
+  fun requestOpenBrowser(url: String? = null) {
+    if (onOpenBrowser == null) {
+      errorMessage = "In-app browser is not available on this platform"
+      return
+    }
+    onOpenBrowser.invoke(url)
+  }
+
   var discoveryState by mutableStateOf<DiscoveryState>(
     DiscoveryState.Idle
   )

@@ -10,8 +10,9 @@ import com.linroid.ketch.app.ui.AppShell
 fun App(
   instanceManager: InstanceManager,
   embeddedAiProvider: AiDiscoveryProvider? = null,
+  onOpenBrowser: ((String?) -> Unit)? = null,
 ) {
   KetchTheme {
-    AppShell(instanceManager, embeddedAiProvider)
+    AppShell(instanceManager, embeddedAiProvider, onOpenBrowser)
   }
 }

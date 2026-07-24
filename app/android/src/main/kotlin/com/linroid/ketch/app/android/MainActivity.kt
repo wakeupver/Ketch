@@ -16,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.linroid.ketch.app.App
+import com.linroid.ketch.app.android.browser.BrowserActivity
 
 class MainActivity : ComponentActivity() {
 
@@ -54,7 +55,17 @@ class MainActivity : ComponentActivity() {
     setContent {
       val svc = service
       if (svc != null) {
-        App(svc.instanceManager, svc.aiProvider)
+        App(
+          svc.instanceManager,
+          svc.aiProvider,
+          onOpenBrowser = { url ->
+            startActivity(
+              Intent(this, BrowserActivity::class.java).apply {
+                url?.let { putExtra(BrowserActivity.EXTRA_URL, it) }
+              },
+            )
+          },
+        )
       }
     }
   }

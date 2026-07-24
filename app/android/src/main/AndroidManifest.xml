@@ -28,6 +28,11 @@
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
     </activity>
+    <activity
+      android:name="com.linroid.ketch.app.android.browser.BrowserActivity"
+      android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+      android:exported="false"
+      android:windowSoftInputMode="adjustResize" />
     <service
       android:name="com.linroid.ketch.app.android.KetchService"
       android:exported="false"
