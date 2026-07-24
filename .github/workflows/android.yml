@@ -32,14 +32,14 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew :app:android:assembleRelease -PVERSION_NAME=${KETCH_VERSION#v}
+        run: ./gradlew :app:android:assembleRelease
 
       - name: Rename APK
         run: |
           APK=$(find app/android/build/outputs/apk/release -name '*.apk' | head -1)
-          cp "$APK" app/android/build/outputs/apk/release/ketch-android-${KETCH_VERSION#v}.apk
+          cp "$APK" app/android/build/outputs/apk/release/ketch-android
 
       - uses: actions/upload-artifact@v7
         with:
           name: ketch-android
-          path: app/android/build/outputs/apk/release/ketch-android-*.apk
+          path: app/android/build/outputs/apk/release/ketch-android.apk
