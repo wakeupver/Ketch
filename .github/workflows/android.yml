@@ -12,6 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Resolve version name
+        run: echo "VERSION_NAME=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -19,27 +22,49 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v5
 
+      # Only runs when the repo actually has a signing keystore configured.
+      # ANDROID_KEYSTORE_FILE is exported via $GITHUB_ENV here (not a step
+      # `env:`), so it's genuinely absent -- not just empty -- for the
+      # Gradle build below whenever this step is skipped, matching
+      # build.gradle.kts's `!= null` check and letting the build fall
+      # back to an unsigned APK instead of failing on a missing file.
+      #
+      # The keystore is validated with `keytool -list` right after
+      # decoding so a bad ANDROID_KEYSTORE_BASE64/ANDROID_KEYSTORE_PASSWORD
+      # secret fails in seconds with a clear message, instead of surfacing
+      # as an opaque DerInputStream error from the signer after a full
+      # multi-minute build.
       - name: Decode keystore
-        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        if: secrets.ANDROID_KEYSTORE_BASE64 != ''
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > /tmp/release.keystore
+          KEYSTORE_PATH="$RUNNER_TEMP/release.keystore"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d -i > "$KEYSTORE_PATH"
+          if [ ! -s "$KEYSTORE_PATH" ]; then
+            echo "::error::Decoded keystore is empty -- ANDROID_KEYSTORE_BASE64 is not set or not valid base64." >&2
+            exit 1
+          fi
+          if ! keytool -list -storepass "$ANDROID_KEYSTORE_PASSWORD" -keystore "$KEYSTORE_PATH" >/dev/null 2>&1; then
+            echo "::error::Decoded keystore at $KEYSTORE_PATH will not open with ANDROID_KEYSTORE_PASSWORD. Recreate the secret from 'base64 -w0 your.keystore' (macOS: 'base64 -i your.keystore') and verify the password secret matches." >&2
+            exit 1
+          fi
+          echo "ANDROID_KEYSTORE_FILE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
 
       - name: Build release APK
         env:
-          ANDROID_KEYSTORE_FILE: /tmp/release.keystore
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew :app:android:assembleRelease
+        run: ./gradlew :app:android:assembleRelease -PVERSION_NAME=$VERSION_NAME
 
       - name: Rename APK
         run: |
           APK=$(find app/android/build/outputs/apk/release -name '*.apk' | head -1)
-          cp "$APK" app/android/build/outputs/apk/release/ketch-android
+          cp "$APK" "app/android/build/outputs/apk/release/ketch-android-$VERSION_NAME.apk"
 
       - uses: actions/upload-artifact@v7
         with:
           name: ketch-android
-          path: app/android/build/outputs/apk/release/ketch-android.apk
+          path: app/android/build/outputs/apk/release/ketch-android-*.apk
