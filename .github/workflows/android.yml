@@ -35,7 +35,7 @@ jobs:
       # as an opaque DerInputStream error from the signer after a full
       # multi-minute build.
       - name: Decode keystore
-        if: secrets.ANDROID_KEYSTORE_BASE64 != ''
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
