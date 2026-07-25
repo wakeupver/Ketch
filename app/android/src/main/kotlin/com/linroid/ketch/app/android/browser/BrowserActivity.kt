@@ -114,7 +114,10 @@ internal class BrowserActivity : ComponentActivity() {
     pendingFileChooserCallback?.onReceiveValue(null)
     pendingFileChooserCallback = callback
     return runCatching { fileChooserLauncher.launch(params.createIntent()) }
-      .onFailure { pendingFileChooserCallback = null }
+      .onFailure {
+        pendingFileChooserCallback = null
+        callback.onReceiveValue(null)
+      }
       .isSuccess
   }
 
