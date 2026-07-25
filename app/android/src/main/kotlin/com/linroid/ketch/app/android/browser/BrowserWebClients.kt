@@ -141,7 +141,6 @@ internal fun browserWebChromeClient(
     isUserGesture: Boolean,
     resultMsg: Message,
   ): Boolean {
-    if (!isUserGesture) return false // basic popup blocking
     val transport = WebView(view.context)
     transport.webViewClient = object : WebViewClient() {
       override fun shouldOverrideUrlLoading(

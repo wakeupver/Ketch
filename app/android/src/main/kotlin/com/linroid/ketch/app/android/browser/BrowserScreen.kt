@@ -9,7 +9,6 @@ import android.os.Bundle
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.SslErrorHandler
-import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -277,12 +276,10 @@ internal fun BrowserRoot(
             onSslError = { handler, error -> pendingSslError = handler to error },
             onShowFileChooser = onShowFileChooser,
             onOpenInNewTab = { url -> browserState.newTab(url) },
-            onDownload = { url, userAgent, disposition, mimeType ->
-              val fileName = URLUtil.guessFileName(url, disposition, mimeType)
+            onDownload = { url, userAgent ->
               val cookie = CookieManager.getInstance().getCookie(url)
               startDownload(
                 url = url,
-                destinationName = fileName,
                 headers = buildMap {
                   put("User-Agent", userAgent)
                   if (!cookie.isNullOrBlank()) put("Cookie", cookie)
@@ -546,7 +543,7 @@ private fun WebViewHost(
   onSslError: (SslErrorHandler, SslError) -> Unit,
   onShowFileChooser: (ValueCallback<Array<Uri>>, WebChromeClient.FileChooserParams) -> Boolean,
   onOpenInNewTab: (String) -> Unit,
-  onDownload: (url: String, userAgent: String, contentDisposition: String, mimeType: String) -> Unit,
+  onDownload: (url: String, userAgent: String) -> Unit,
   modifier: Modifier = Modifier,
 ) {
   AndroidView(
@@ -567,9 +564,7 @@ private fun WebViewHost(
           onShowFileChooser = onShowFileChooser,
           onOpenInNewTab = onOpenInNewTab,
         )
-        setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
-          onDownload(url, userAgent, contentDisposition, mimeType)
-        }
+        setDownloadListener { url, userAgent, _, _, _ -> onDownload(url, userAgent) }
         val saved = tab.savedState
         if (saved != null) restoreState(saved) else loadUrl(tab.url)
         onCreated(this)
