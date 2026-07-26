@@ -1,10 +1,6 @@
 package com.linroid.ketch.cli
 
 import ch.qos.logback.classic.Level
-import com.linroid.ketch.ai.AiConfig
-import com.linroid.ketch.ai.AiModule
-import com.linroid.ketch.ai.LlmConfig
-import com.linroid.ketch.ai.resolveSearchConfigFromEnv
 import com.linroid.ketch.api.Destination
 import com.linroid.ketch.api.DownloadPriority
 import com.linroid.ketch.api.DownloadRequest
@@ -14,17 +10,14 @@ import com.linroid.ketch.api.SpeedLimit
 import com.linroid.ketch.api.DownloadConfig
 import com.linroid.ketch.api.log.LogLevel
 import com.linroid.ketch.api.log.Logger
-import com.linroid.ketch.ai.DiscoverQuery
 import com.linroid.ketch.config.FileConfigStore
 import com.linroid.ketch.config.KetchConfig
 import com.linroid.ketch.config.defaultConfigPath
 import com.linroid.ketch.config.defaultDbPath
-import com.linroid.ketch.config.generateConfig
 import com.linroid.ketch.core.Ketch
 import com.linroid.ketch.engine.KtorHttpEngine
 import com.linroid.ketch.ftp.FtpDownloadSource
 import com.linroid.ketch.mcp.KetchMcpServer
-import com.linroid.ketch.server.KetchServer
 import com.linroid.ketch.sqlite.DriverFactory
 import com.linroid.ketch.sqlite.SqliteTaskStore
 import kotlinx.coroutines.delay
@@ -50,14 +43,6 @@ fun main(args: Array<String>) {
   }
 
   when (remaining[0]) {
-    "server" -> {
-      runServer(remaining.drop(1).toTypedArray())
-      return
-    }
-    "ai-discover" -> {
-      runAiDiscover(remaining.drop(1))
-      return
-    }
     "mcp" -> {
       runMcp(remaining.drop(1))
       return
@@ -265,325 +250,6 @@ private fun applyGlobalFlags(args: MutableList<String>): List<String> {
   return remaining
 }
 
-private fun runServer(args: Array<String>) {
-  // Track which CLI flags are explicitly set
-  var cliHost: String? = null
-  var cliPort: Int? = null
-  var cliToken: String? = null
-  var cliCorsOrigins: List<String>? = null
-  var cliDownloadDir: String? = null
-  var cliSpeedLimit: SpeedLimit? = null
-  var configPath: String? = null
-
-  var i = 0
-  while (i < args.size) {
-    when (args[i]) {
-      "--help", "-h" -> {
-        printServerUsage()
-        return
-      }
-      "--generate-config" -> {
-        val path = defaultConfigPath()
-        if (File(path).exists()) {
-          System.err.println("Config file already exists: $path")
-          System.err.println(
-            "Delete it first if you want to regenerate."
-          )
-          return
-        }
-        generateConfig(path)
-        println("Generated default config at: $path")
-        return
-      }
-      "--config" -> {
-        if (i + 1 >= args.size) {
-          System.err.println("Error: --config requires a value")
-          printServerUsage()
-          return
-        }
-        configPath = args[++i]
-      }
-      "--host" -> {
-        if (i + 1 >= args.size) {
-          System.err.println("Error: --host requires a value")
-          printServerUsage()
-          return
-        }
-        cliHost = args[++i]
-      }
-      "--port" -> {
-        if (i + 1 >= args.size) {
-          System.err.println("Error: --port requires a value")
-          printServerUsage()
-          return
-        }
-        val value = args[++i].toIntOrNull()
-        if (value == null || value !in 1..65535) {
-          System.err.println("Error: invalid port '${args[i]}'")
-          return
-        }
-        cliPort = value
-      }
-      "--token" -> {
-        if (i + 1 >= args.size) {
-          System.err.println("Error: --token requires a value")
-          printServerUsage()
-          return
-        }
-        cliToken = args[++i]
-      }
-      "--cors" -> {
-        if (i + 1 >= args.size) {
-          System.err.println("Error: --cors requires a value")
-          printServerUsage()
-          return
-        }
-        cliCorsOrigins = args[++i].split(",").map { it.trim() }
-      }
-      "--dir" -> {
-        if (i + 1 >= args.size) {
-          System.err.println("Error: --dir requires a value")
-          printServerUsage()
-          return
-        }
-        cliDownloadDir = args[++i]
-      }
-      "--speed-limit" -> {
-        if (i + 1 >= args.size) {
-          System.err.println("Error: --speed-limit requires a value")
-          printServerUsage()
-          return
-        }
-        cliSpeedLimit = SpeedLimit.parse(args[++i]) ?: run {
-          System.err.println("Error: invalid speed limit '${args[i]}'")
-          printServerUsage()
-          return
-        }
-      }
-      else -> {
-        System.err.println("Error: unknown option '${args[i]}'")
-        printServerUsage()
-        return
-      }
-    }
-    i++
-  }
-
-  // Load config: explicit --config path, or default path if exists,
-  // or empty defaults
-  val fileConfig = if (configPath != null) {
-    try {
-      FileConfigStore(configPath).load()
-    } catch (e: Exception) {
-      System.err.println("Error loading config: ${e.message}")
-      return
-    }
-  } else {
-    val defaultPath = defaultConfigPath()
-    if (File(defaultPath).exists()) {
-      try {
-        println("Loading config from $defaultPath")
-        FileConfigStore(defaultPath).load()
-      } catch (e: Exception) {
-        System.err.println(
-          "Error loading config from $defaultPath: ${e.message}"
-        )
-        return
-      }
-    } else {
-      KetchConfig()
-    }
-  }
-
-  // CLI flags override config file values
-  val defaultDownloadDir = System.getProperty("user.home") +
-    File.separator + "Downloads"
-  val mergedConfig = fileConfig.copy(
-    server = fileConfig.server.copy(
-      host = cliHost ?: fileConfig.server.host,
-      port = cliPort ?: fileConfig.server.port,
-      apiToken = cliToken ?: fileConfig.server.apiToken,
-      corsAllowedHosts = cliCorsOrigins
-        ?: fileConfig.server.corsAllowedHosts,
-    ),
-    download = fileConfig.download.copy(
-      defaultDirectory = cliDownloadDir
-        ?: fileConfig.download.defaultDirectory
-        ?: defaultDownloadDir,
-      speedLimit = cliSpeedLimit
-        ?: fileConfig.download.speedLimit,
-    ),
-  )
-
-  val downloadConfig = mergedConfig.download
-  val serverConfig = mergedConfig.server
-  val instanceName = mergedConfig.name ?: "Ketch"
-
-  File(downloadConfig.defaultDirectory).mkdirs()
-
-  val dbPath = defaultDbPath()
-  val driver = DriverFactory(dbPath).createDriver()
-  val taskStore = SqliteTaskStore(driver)
-
-  val ketch = Ketch(
-    httpEngine = KtorHttpEngine(),
-    taskStore = taskStore,
-    config = downloadConfig,
-    name = instanceName,
-    logger = Logger.console(ketchLogLevel),
-    additionalSources = listOf(FtpDownloadSource())
-  )
-  val server = KetchServer(
-    ketch,
-    host = serverConfig.host,
-    port = serverConfig.port,
-    apiToken = serverConfig.apiToken,
-    name = instanceName,
-    corsAllowedHosts = serverConfig.corsAllowedHosts,
-    mdnsEnabled = serverConfig.mdnsEnabled,
-  )
-
-  Runtime.getRuntime().addShutdownHook(Thread {
-    println("Shutting down Ketch server...")
-    server.stop()
-    ketch.close()
-  })
-
-  println("Ketch Server v${KetchApi.VERSION}")
-  println("  Host:          ${serverConfig.host}")
-  println("  Port:          ${serverConfig.port}")
-  println("  Download dir:  ${downloadConfig.defaultDirectory}")
-  println("  Database:      $dbPath")
-  if (configPath != null) {
-    println("  Config:        $configPath")
-  }
-  if (serverConfig.apiToken != null) {
-    println("  Auth:          enabled")
-  }
-  if (serverConfig.corsAllowedHosts.isNotEmpty()) {
-    println(
-      "  CORS origins:  " +
-        serverConfig.corsAllowedHosts.joinToString(", ")
-    )
-  }
-  if (!downloadConfig.speedLimit.isUnlimited) {
-    println(
-      "  Speed limit:   " +
-        "${downloadConfig.speedLimit.bytesPerSecond / 1024} KB/s"
-    )
-  }
-  println()
-
-  server.start(wait = true)
-}
-
-private fun runAiDiscover(args: List<String>) {
-  if (args.isEmpty()) {
-    println("Usage: ketch ai-discover <query> [--sites domain1,domain2]")
-    println()
-    println("Examples:")
-    println("  ketch ai-discover \"latest Ubuntu 24.04 ISO\"")
-    println("  ketch ai-discover \"ffmpeg release\" --sites ffmpeg.org")
-    println()
-    println("Set OPENAI_API_KEY env var for LLM-powered discovery.")
-    println("Without it, results will be empty.")
-    return
-  }
-
-  var query = ""
-  var sites = emptyList<String>()
-  var maxResults = 5
-
-  var i = 0
-  while (i < args.size) {
-    when (args[i]) {
-      "--sites" -> {
-        if (i + 1 < args.size) {
-          sites = args[++i].split(",").map { it.trim() }
-        }
-      }
-      "--max-results" -> {
-        if (i + 1 < args.size) {
-          maxResults = args[++i].toIntOrNull() ?: 5
-        }
-      }
-      else -> {
-        query = if (query.isEmpty()) args[i]
-        else "$query ${args[i]}"
-      }
-    }
-    i++
-  }
-
-  if (query.isBlank()) {
-    println("Error: query is required")
-    return
-  }
-
-  val apiKey = System.getenv("OPENAI_API_KEY") ?: ""
-  if (apiKey.isBlank()) {
-    println("Note: OPENAI_API_KEY not set." +
-      " Discovery will return empty results.")
-    println()
-  }
-
-  val aiConfig = AiConfig(
-    enabled = true,
-    llm = LlmConfig(apiKey = apiKey),
-    search = resolveSearchConfigFromEnv(),
-  )
-  val aiModule = AiModule.create(aiConfig)
-
-  println("Discovering resources for: \"$query\"")
-  if (sites.isNotEmpty()) {
-    println("Sites: ${sites.joinToString(", ")}")
-  }
-  println()
-
-  runBlocking {
-    val discoverQuery = DiscoverQuery(
-      query = query,
-      sites = sites,
-      maxResults = maxResults,
-    )
-    val response = aiModule.discoveryService.discover(discoverQuery)
-
-    if (response.candidates.isEmpty()) {
-      println("No candidates found.")
-      if (apiKey.isBlank()) {
-        println("(Set OPENAI_API_KEY for real results)")
-      }
-      return@runBlocking
-    }
-
-    println("Found ${response.candidates.size} candidate(s):")
-    println()
-    response.candidates.forEachIndexed { idx, candidate ->
-      println("  ${idx + 1}. ${candidate.title}")
-      println("     URL: ${candidate.url}")
-      if (candidate.fileName != null) {
-        println("     File: ${candidate.fileName}")
-      }
-      val fileSize = candidate.fileSize
-      if (fileSize != null) {
-        println("     Size: ${formatBytes(fileSize)}")
-      }
-      println("     Confidence: ${"%.0f".format(candidate.confidence * 100)}%")
-      if (candidate.description.isNotEmpty()) {
-        println("     ${candidate.description}")
-      }
-      println()
-    }
-
-    if (response.sources.isNotEmpty()) {
-      println("Sources analyzed:")
-      response.sources.forEach { src ->
-        println("  - ${src.title} (${src.url})")
-      }
-    }
-  }
-}
-
 private fun runMcp(args: List<String>) {
   var configPath: String? = null
   var cliDownloadDir: String? = null
@@ -688,9 +354,7 @@ private fun printMcpUsage() {
 
 private fun printUsage() {
   println("Usage: ketch [options] <url> [destination]")
-  println("       ketch server [options]")
   println("       ketch mcp [options]")
-  println("       ketch ai-discover <query> [options]")
   println()
   println("Global Options:")
   println("  -v, --verbose            Enable verbose logging (DEBUG)")
@@ -705,65 +369,15 @@ private fun printUsage() {
   println("  --max-concurrent <n>     Max simultaneous downloads")
   println("                           Default: 3")
   println()
-  println("Server:")
-  println("  server [options]         Start Ketch daemon server")
-  println("                           Run `ketch server --help`")
-  println("                           for server options")
-  println()
   println("MCP Server:")
   println("  mcp [options]            Start MCP server (stdio)")
   println("                           Run `ketch mcp --help`")
   println("                           for MCP options")
   println()
-  println("AI Discovery:")
-  println("  ai-discover <query>      Discover downloadable resources")
-  println("    --sites <domains>      Comma-separated domain allowlist")
-  println("    --max-results <n>      Max results (default: 5)")
-  println("                           Requires OPENAI_API_KEY env var")
-  println()
-  println("  Search env vars (checked in order):")
-  println("    BING_SEARCH_API_KEY    Use Bing Web Search API")
-  println("    GOOGLE_SEARCH_API_KEY  Use Google Custom Search")
-  println("    GOOGLE_SEARCH_CX      Google Search Engine ID")
-  println()
   println("Examples:")
   println("  ketch https://example.com/file.zip")
   println("  ketch -v https://example.com/file.zip")
   println("  ketch --priority high https://example.com/file.zip")
-  println("  ketch server --port 9000 --dir /tmp/downloads")
-  println("  ketch ai-discover \"latest Ubuntu ISO\"")
-  println("  ketch ai-discover \"ffmpeg\" --sites ffmpeg.org")
-}
-
-private fun printServerUsage() {
-  println("Usage: ketch server [options]")
-  println()
-  println("Options:")
-  println("  --config <path>        Path to TOML config file")
-  println("  --generate-config      Generate default config and exit")
-  println("  --host <address>       Bind address (default: 0.0.0.0)")
-  println("  --port <number>        Port number (default: 8642)")
-  println("  --token <string>       API bearer token (optional)")
-  println("  --cors <origins>       CORS allowed origins,")
-  println("                         comma-separated (optional)")
-  println("  --dir <path>           Download directory")
-  println("                         (default: ~/Downloads)")
-  println("  --speed-limit <value>  Global speed limit")
-  println("                         (e.g., 10m, 500k)")
-  println("  --help, -h             Show this help message")
-  println()
-  println("Config file:")
-  println("  Default location: ${defaultConfigPath()}")
-  println("  CLI flags override config file values.")
-  println("  Use --generate-config to create a default file.")
-  println()
-  println("Examples:")
-  println("  ketch server")
-  println("  ketch server --port 9000 --dir /tmp/downloads")
-  println("  ketch server --token my-secret --cors '*'")
-  println("  ketch server --speed-limit 10m")
-  println("  ketch server --config /path/to/config.toml")
-  println("  ketch server --generate-config")
 }
 
 private fun parsePriority(value: String): DownloadPriority? {

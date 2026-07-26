@@ -1,6 +1,5 @@
 @file:Suppress("UnstableApiUsage")
 
-import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -23,9 +22,6 @@ kotlin {
   iosSimulatorArm64()
   jvm()
 
-  @OptIn(ExperimentalWasmDsl::class)
-  wasmJs { browser() }
-
   sourceSets {
     commonMain.dependencies {
       api(projects.library.api)
@@ -34,9 +30,6 @@ kotlin {
     }
     commonTest.dependencies {
       implementation(libs.kotlin.test)
-    }
-    wasmJsMain.dependencies {
-      implementation(libs.kotlinx.browser)
     }
   }
 }

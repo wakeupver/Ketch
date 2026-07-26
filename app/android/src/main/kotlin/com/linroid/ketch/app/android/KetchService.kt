@@ -12,33 +12,20 @@ import android.os.Environment
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import com.linroid.ketch.ai.AiConfig
-import com.linroid.ketch.ai.AiModule
-import com.linroid.ketch.ai.LlmConfig
-import com.linroid.ketch.ai.resolveSearchConfigFromEnv
+import com.linroid.ketch.api.KetchApi
 import com.linroid.ketch.api.log.KetchLogger
 import com.linroid.ketch.api.log.Logger
-import com.linroid.ketch.app.instance.InstanceFactory
-import com.linroid.ketch.app.instance.InstanceManager
-import com.linroid.ketch.app.instance.LocalServerHandle
-import com.linroid.ketch.app.instance.ServerState
-import com.linroid.ketch.app.state.AiDiscoveryProvider
-import com.linroid.ketch.app.state.EmbeddedAiDiscoveryProvider
 import com.linroid.ketch.config.FileConfigStore
 import com.linroid.ketch.core.Ketch
 import com.linroid.ketch.engine.KtorHttpEngine
 import com.linroid.ketch.ftp.FtpDownloadSource
-import com.linroid.ketch.server.KetchServer
 import com.linroid.ketch.sqlite.DriverFactory
 import com.linroid.ketch.sqlite.createSqliteTaskStore
 import com.linroid.ketch.torrent.TorrentDownloadSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -50,9 +37,7 @@ class KetchService : Service() {
     val service: KetchService get() = this@KetchService
   }
 
-  lateinit var instanceManager: InstanceManager
-    private set
-  var aiProvider: AiDiscoveryProvider? = null
+  lateinit var api: KetchApi
     private set
 
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -60,7 +45,6 @@ class KetchService : Service() {
   private var isForeground = false
   private var isBound = false
   private var latestActiveCount = 0
-  private var latestServerState: ServerState = ServerState.Stopped
   private var shouldStayForeground = false
 
   override fun onCreate() {
@@ -71,7 +55,7 @@ class KetchService : Service() {
     ServiceCompat.startForeground(
       this,
       NOTIFICATION_ID,
-      buildNotification(0, ServerState.Stopped),
+      buildNotification(0),
       ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
     )
     isForeground = true
@@ -90,69 +74,26 @@ class KetchService : Service() {
     )
     val instanceName = config.name
       ?: android.os.Build.MODEL
-    instanceManager = InstanceManager(
-      factory = InstanceFactory(
-        deviceName = instanceName,
-        embeddedFactory = {
-          Ketch(
-            httpEngine = KtorHttpEngine(),
-            taskStore = taskStore,
-            config = downloadConfig,
-            name = instanceName,
-            logger = Logger.console(),
-            additionalSources = listOf(
-              FtpDownloadSource(),
-              TorrentDownloadSource(),
-            ),
-          )
-        },
-        localServerFactory = { ketchApi ->
-          val serverConfig = config.server
-          log.i { "Starting local server on port ${serverConfig.port}" }
-          val server = KetchServer(
-            ketchApi,
-            host = serverConfig.host,
-            port = serverConfig.port,
-            apiToken = serverConfig.apiToken,
-            name = instanceName,
-            corsAllowedHosts = serverConfig.corsAllowedHosts
-              .takeIf { it.isNotEmpty() } ?: listOf("*"),
-            mdnsEnabled = serverConfig.mdnsEnabled,
-          )
-          server.start(wait = false)
-          log.i { "Local server started on port ${serverConfig.port}" }
-          object : LocalServerHandle {
-            override fun stop() {
-              log.i { "Stopping local server" }
-              server.stop()
-              log.i { "Local server stopped" }
-            }
-          }
-        },
+    val ketch = Ketch(
+      httpEngine = KtorHttpEngine(),
+      taskStore = taskStore,
+      config = downloadConfig,
+      name = instanceName,
+      logger = Logger.console(),
+      additionalSources = listOf(
+        FtpDownloadSource(),
+        TorrentDownloadSource(),
       ),
-      initialRemotes = config.remotes,
-      configStore = configStore,
     )
+    api = ketch
+    scope.launch { ketch.start() }
 
-    val apiKey = System.getenv("OPENAI_API_KEY") ?: ""
-    if (apiKey.isNotBlank()) {
-      val aiModule = AiModule.create(
-        AiConfig(
-          enabled = true,
-          llm = LlmConfig(apiKey = apiKey),
-          search = resolveSearchConfigFromEnv(),
-        ),
-      )
-      aiProvider = EmbeddedAiDiscoveryProvider(
-        aiModule.discoveryService,
-      )
-    }
     startForegroundMonitor()
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     if (intent?.action == ACTION_REPOST_NOTIFICATION && isForeground && shouldStayForeground) {
-      val notification = buildNotification(latestActiveCount, latestServerState)
+      val notification = buildNotification(latestActiveCount)
       ServiceCompat.startForeground(
         this,
         NOTIFICATION_ID,
@@ -178,7 +119,7 @@ class KetchService : Service() {
 
   override fun onDestroy() {
     super.onDestroy()
-    instanceManager.close()
+    api.close()
     scope.cancel()
   }
 
@@ -192,24 +133,15 @@ class KetchService : Service() {
     manager.createNotificationChannel(channel)
   }
 
-  @OptIn(ExperimentalCoroutinesApi::class)
   private fun startForegroundMonitor() {
     scope.launch {
-      combine(
-        instanceManager.activeApi.flatMapLatest { api ->
-          api.tasks.map { tasks ->
-            tasks.count { it.state.value.isActive }
-          }
-        },
-        instanceManager.serverState,
-      ) { activeCount, serverState ->
-        Triple(activeCount, serverState, activeCount > 0 || serverState is ServerState.Running)
-      }.collect { (activeCount, serverState, shouldBeForeground) ->
+      api.tasks.map { tasks ->
+        tasks.count { it.state.value.isActive }
+      }.collect { activeCount ->
         latestActiveCount = activeCount
-        latestServerState = serverState
-        shouldStayForeground = shouldBeForeground
-        if (shouldBeForeground) {
-          val notification = buildNotification(activeCount, serverState)
+        shouldStayForeground = activeCount > 0
+        if (shouldStayForeground) {
+          val notification = buildNotification(activeCount)
           if (!isForeground) {
             log.i { "Start notification" }
           }
@@ -234,7 +166,6 @@ class KetchService : Service() {
 
   private fun buildNotification(
     activeCount: Int,
-    serverState: ServerState,
   ): android.app.Notification {
     val contentIntent = PendingIntent.getActivity(
       this,
@@ -242,15 +173,13 @@ class KetchService : Service() {
       Intent(this, MainActivity::class.java),
       PendingIntent.FLAG_IMMUTABLE,
     )
-    val text = buildString {
-      if (activeCount > 0) {
+    val text = if (activeCount > 0) {
+      buildString {
         append("Downloading $activeCount file")
         if (activeCount > 1) append("s")
       }
-      if (serverState is ServerState.Running) {
-        if (activeCount > 0) append(" · ")
-        append("Server on :${serverState.port}")
-      }
+    } else {
+      ""
     }
     val deleteIntent = PendingIntent.getService(
       this,

@@ -83,13 +83,11 @@ android {
 dependencies {
   implementation(projects.config)
   implementation(projects.app.shared)
-  implementation(projects.ai.discover)
   implementation(projects.library.core)
   implementation(projects.library.ktor)
   implementation(projects.library.ftp)
   implementation(projects.library.torrent)
   implementation(projects.library.sqlite)
-  implementation(projects.library.server)
   implementation(libs.androidx.activity.compose)
   implementation(libs.compose.foundation)
   implementation(libs.compose.material3)

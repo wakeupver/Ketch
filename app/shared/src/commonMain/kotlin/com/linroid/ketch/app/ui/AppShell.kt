@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Badge
@@ -32,7 +31,6 @@ import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -45,14 +43,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.window.core.layout.WindowSizeClass
 import com.linroid.ketch.api.DownloadState
-import com.linroid.ketch.app.instance.InstanceManager
-import com.linroid.ketch.app.state.AiDiscoveryProvider
+import com.linroid.ketch.api.KetchApi
 import com.linroid.ketch.app.state.AppState
 import com.linroid.ketch.app.state.StatusFilter
 import com.linroid.ketch.app.ui.dialog.AddDownloadDialog
-import com.linroid.ketch.app.ui.dialog.AddRemoteServerDialog
-import com.linroid.ketch.app.ui.dialog.AiDiscoverDialog
-import com.linroid.ketch.app.ui.dialog.InstanceSelectorSheet
 import com.linroid.ketch.app.ui.list.DownloadList
 import com.linroid.ketch.app.ui.sidebar.SidebarNavigation
 import com.linroid.ketch.app.ui.sidebar.SpeedStatusBar
@@ -63,28 +57,15 @@ import com.linroid.ketch.app.ui.toolbar.countTasksByFilter
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppShell(
-  instanceManager: InstanceManager,
-  embeddedAiProvider: AiDiscoveryProvider? = null,
+  api: KetchApi,
   onOpenBrowser: ((String?) -> Unit)? = null,
 ) {
   val scope = rememberCoroutineScope()
-  val appState = remember(instanceManager) {
-    AppState(instanceManager, scope, embeddedAiProvider, onOpenBrowser)
-  }
-
-  val instances by appState.instances.collectAsState()
-  // Auto-show add-remote-server dialog when no instances
-  // are configured (remote-only mode without auto-connect).
-  LaunchedEffect(instances) {
-    if (instances.isEmpty()) {
-      appState.showAddRemoteDialog = true
-    }
+  val appState = remember(api) {
+    AppState(api, scope, onOpenBrowser)
   }
 
   val sortedTasks by appState.sortedTasks.collectAsState()
-  val activeInstance by appState.activeInstance.collectAsState()
-  val connectionState by appState.connectionState.collectAsState()
-  val serverState by appState.serverState.collectAsState()
 
   // Collect all task states for filtering/counts
   val taskStates = remember {
@@ -241,16 +222,6 @@ fun AppShell(
               actions = {
                 IconButton(
                   onClick = {
-                    appState.showAiDiscoverDialog = true
-                  },
-                ) {
-                  Icon(
-                    Icons.Filled.AutoAwesome,
-                    contentDescription = "AI Discover",
-                  )
-                }
-                IconButton(
-                  onClick = {
                     appState.requestOpenBrowser()
                   },
                 ) {
@@ -335,11 +306,6 @@ fun AppShell(
         SpeedStatusBar(
           activeDownloads = activeDownloadCount,
           totalSpeed = totalSpeed,
-          instanceLabel = activeInstance?.label,
-          connectionState = connectionState,
-          onInstanceClick = {
-            appState.showInstanceSelector = true
-          },
         )
       }
 
@@ -383,76 +349,6 @@ fun AppShell(
           schedule, resolvedUrl, selectedFileIds,
         )
       },
-    )
-  }
-
-  if (appState.showInstanceSelector) {
-    InstanceSelectorSheet(
-      instanceManager = instanceManager,
-      activeInstance = activeInstance,
-      switchingInstance = appState.switchingInstance,
-      serverState = serverState,
-      onSelectInstance = { instance ->
-        appState.switchInstance(instance)
-      },
-      onRemoveInstance = { instance ->
-        appState.removeInstance(instance)
-      },
-      onAddRemoteServer = {
-        appState.showAddRemoteDialog = true
-      },
-      onDismiss = {
-        appState.showInstanceSelector = false
-      },
-    )
-  }
-
-  if (appState.showAiDiscoverDialog) {
-    AiDiscoverDialog(
-      state = appState.aiDiscoverState,
-      onDiscover = { query, sites ->
-        appState.aiDiscover(query, sites)
-      },
-      onDownloadSelected = { candidates ->
-        appState.aiDownloadSelected(candidates)
-      },
-      onDismiss = {
-        appState.resetAiDiscover()
-        appState.showAiDiscoverDialog = false
-      },
-    )
-  }
-
-  if (appState.showAddRemoteDialog) {
-    val unauthorized = appState.unauthorizedInstance
-    AddRemoteServerDialog(
-      onDismiss = {
-        appState.resetDiscovery()
-        appState.showAddRemoteDialog = false
-        appState.unauthorizedInstance = null
-      },
-      discoveryState = appState.discoveryState,
-      onDiscover = { port ->
-        appState.discoverRemoteServers(port)
-      },
-      onStopDiscovery = {
-        appState.stopDiscovery()
-      },
-      onAdd = { host, port, token ->
-        appState.resetDiscovery()
-        appState.showAddRemoteDialog = false
-        if (unauthorized != null) {
-          appState.reconnectWithToken(
-            unauthorized, token ?: "",
-          )
-        } else {
-          appState.addRemoteServer(host, port, token)
-        }
-      },
-      initialHost = unauthorized?.host ?: "",
-      initialPort = unauthorized?.port?.toString()
-        ?: "8642",
-      authRequired = unauthorized != null,
     )
   }
 }

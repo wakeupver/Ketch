@@ -27,9 +27,6 @@ class MainActivity : ComponentActivity() {
   private val requestExternalStoragePermission = registerForActivityResult(
     ActivityResultContracts.RequestPermission(),
   ) { }
-  private val requestNearbyWifiPermission = registerForActivityResult(
-    ActivityResultContracts.RequestPermission(),
-  ) { }
 
   private val connection = object : ServiceConnection {
     override fun onServiceConnected(name: ComponentName, binder: IBinder) {
@@ -46,7 +43,6 @@ class MainActivity : ComponentActivity() {
     enableEdgeToEdge()
     requestExternalStoragePermissionIfNeeded()
     requestNotificationPermissionIfNeeded()
-    requestNearbyWifiPermissionIfNeeded()
     bindService(
       Intent(this, KetchService::class.java),
       connection,
@@ -56,8 +52,7 @@ class MainActivity : ComponentActivity() {
       val svc = service
       if (svc != null) {
         App(
-          svc.instanceManager,
-          svc.aiProvider,
+          svc.api,
           onOpenBrowser = { url ->
             startActivity(
               Intent(this, BrowserActivity::class.java).apply {
@@ -83,21 +78,6 @@ class MainActivity : ComponentActivity() {
       return
     }
     requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-  }
-
-  private fun requestNearbyWifiPermissionIfNeeded() {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-      return
-    }
-    if (checkSelfPermission(
-        Manifest.permission.NEARBY_WIFI_DEVICES
-      ) == PackageManager.PERMISSION_GRANTED
-    ) {
-      return
-    }
-    requestNearbyWifiPermission.launch(
-      Manifest.permission.NEARBY_WIFI_DEVICES
-    )
   }
 
   private fun requestExternalStoragePermissionIfNeeded() {

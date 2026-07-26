@@ -31,11 +31,6 @@ kotlin {
 
   jvm()
 
-  iosArm64()
-  iosSimulatorArm64()
-
-  jvm()
-
   sourceSets {
     commonMain.dependencies {
       api(projects.library.core)
@@ -49,9 +44,6 @@ kotlin {
     }
     jvmMain.dependencies {
       implementation(libs.ktor.client.cio)
-    }
-    wasmJsMain.dependencies {
-      implementation(libs.ktor.client.js)
     }
     commonTest.dependencies {
       implementation(libs.kotlin.test)

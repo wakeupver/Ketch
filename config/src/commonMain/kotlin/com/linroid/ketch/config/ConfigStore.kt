@@ -8,8 +8,8 @@ import com.akuleshov7.ktoml.TomlOutputConfig
 /**
  * Reads and writes [KetchConfig] for the app.
  *
- * Implementations persist the config as TOML (file-based on
- * Android/JVM/iOS, localStorage on web).
+ * Implementations persist the config as TOML on disk
+ * (Android/JVM/iOS).
  */
 interface ConfigStore {
   /** Load saved config, or return defaults if none exists. */

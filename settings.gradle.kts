@@ -37,18 +37,12 @@ plugins {
 // Library modules
 include(":library:core")
 include(":library:api")
-include(":library:remote")
-include(":library:endpoints")
 include(":library:ktor")
 include(":library:kermit")
 include(":library:sqlite")
 include(":library:ftp")
 include(":library:torrent")
-include(":library:server")
 include(":library:mcp")
-
-// AI modules
-include(":ai:discover")
 
 // Config module
 include(":config")
@@ -57,5 +51,4 @@ include(":config")
 include(":app:shared")
 include(":app:android")
 include(":app:desktop")
-include(":app:web")
 include(":cli")

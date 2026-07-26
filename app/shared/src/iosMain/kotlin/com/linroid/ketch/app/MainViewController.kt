@@ -1,11 +1,10 @@
 package com.linroid.ketch.app
 
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.window.ComposeUIViewController
 import com.linroid.ketch.api.log.Logger
-import com.linroid.ketch.app.instance.InstanceFactory
-import com.linroid.ketch.app.instance.InstanceManager
 import com.linroid.ketch.config.FileConfigStore
 import com.linroid.ketch.core.Ketch
 import com.linroid.ketch.engine.KtorHttpEngine
@@ -20,7 +19,7 @@ import platform.UIKit.UIDevice
 
 @Suppress("unused", "FunctionName")
 fun MainViewController() = ComposeUIViewController {
-  val instanceManager = remember {
+  val ketch = remember {
     @Suppress("UNCHECKED_CAST")
     val docsDir = (NSSearchPathForDirectoriesInDomains(
       NSDocumentDirectory, NSUserDomainMask, true,
@@ -34,29 +33,21 @@ fun MainViewController() = ComposeUIViewController {
     )
     val instanceName = config.name
       ?: UIDevice.currentDevice.name
-    InstanceManager(
-      factory = InstanceFactory(
-        deviceName = instanceName,
-        embeddedFactory = {
-          Ketch(
-            httpEngine = KtorHttpEngine(),
-            taskStore = taskStore,
-            config = downloadConfig,
-            name = instanceName,
-            logger = Logger.console(),
-            additionalSources = listOf(
-              FtpDownloadSource(),
-              TorrentDownloadSource(),
-            ),
-          )
-        },
+    Ketch(
+      httpEngine = KtorHttpEngine(),
+      taskStore = taskStore,
+      config = downloadConfig,
+      name = instanceName,
+      logger = Logger.console(),
+      additionalSources = listOf(
+        FtpDownloadSource(),
+        TorrentDownloadSource(),
       ),
-      initialRemotes = config.remotes,
-      configStore = configStore,
     )
   }
-  DisposableEffect(Unit) {
-    onDispose { instanceManager.close() }
+  LaunchedEffect(ketch) { ketch.start() }
+  DisposableEffect(ketch) {
+    onDispose { ketch.close() }
   }
-  App(instanceManager)
+  App(ketch)
 }

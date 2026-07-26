@@ -98,7 +98,7 @@ import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import com.linroid.ketch.api.Destination
 import com.linroid.ketch.api.DownloadRequest
-import com.linroid.ketch.app.instance.InstanceManager
+import com.linroid.ketch.api.KetchApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -108,9 +108,9 @@ import kotlinx.serialization.json.Json
 
 /**
  * Root composable for the in-app browser. Owns tab/navigation state,
- * collects the currently-active [com.linroid.ketch.api.KetchApi] from
- * [instanceManager] for downloads, and hosts exactly one live
- * [WebView] at a time via [activeWebViewHolder].
+ * uses the embedded [com.linroid.ketch.api.KetchApi] instance
+ * ([api]) for downloads, and hosts exactly one live [WebView] at a
+ * time via [activeWebViewHolder].
  *
  * @param activeWebViewHolder bridges the Compose-managed WebView to
  *   the hosting Activity (back-press handling, process-death saves).
@@ -119,7 +119,7 @@ import kotlinx.serialization.json.Json
  */
 @Composable
 internal fun BrowserRoot(
-  instanceManager: InstanceManager,
+  api: KetchApi,
   historyStore: BrowserHistoryStore,
   initialUrl: String?,
   activeWebViewHolder: MutableStateFlow<WebView?>,
@@ -129,7 +129,6 @@ internal fun BrowserRoot(
 ) {
   val scope = rememberCoroutineScope()
   val context = LocalContext.current
-  val ketchApi by instanceManager.activeApi.collectAsState()
   val browserState = rememberSaveable(saver = BrowserStateSaver) { BrowserState() }
   val snackbarHostState = remember { SnackbarHostState() }
   var pendingSslError by remember { mutableStateOf<Pair<SslErrorHandler, SslError>?>(null) }
@@ -174,7 +173,7 @@ internal fun BrowserRoot(
   ) {
     scope.launch {
       runCatching {
-        ketchApi.download(
+        api.download(
           DownloadRequest(
             url = url,
             destination = destinationName?.let(::Destination),

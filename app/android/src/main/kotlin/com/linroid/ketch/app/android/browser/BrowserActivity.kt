@@ -93,7 +93,7 @@ internal class BrowserActivity : ComponentActivity() {
           }
         } else {
           BrowserRoot(
-            instanceManager = service.instanceManager,
+            api = service.api,
             historyStore = remember { BrowserHistoryStore(applicationContext) },
             initialUrl = initialUrl,
             activeWebViewHolder = activeWebViewHolder,

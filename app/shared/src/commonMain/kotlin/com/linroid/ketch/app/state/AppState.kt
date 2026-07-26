@@ -12,38 +12,12 @@ import com.linroid.ketch.api.DownloadTask
 import com.linroid.ketch.api.KetchApi
 import com.linroid.ketch.api.ResolvedSource
 import com.linroid.ketch.api.SpeedLimit
-import com.linroid.ketch.app.instance.DiscoveredServer
-import com.linroid.ketch.app.instance.InstanceEntry
-import com.linroid.ketch.app.instance.InstanceManager
-import com.linroid.ketch.app.instance.LanServerDiscovery
-import com.linroid.ketch.app.instance.EmbeddedInstance
-import com.linroid.ketch.app.instance.RemoteInstance
-import com.linroid.ketch.app.instance.ServerState
-import com.linroid.ketch.app.ui.dialog.AiDiscoverState
-import com.linroid.ketch.remote.ConnectionState
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-
-sealed interface DiscoveryState {
-  data object Idle : DiscoveryState
-  data class Discovering(
-    val servers: List<DiscoveredServer> = emptyList(),
-  ) : DiscoveryState
-  data class Finished(
-    val servers: List<DiscoveredServer>,
-  ) : DiscoveryState
-  data class Error(val message: String) : DiscoveryState
-}
 
 sealed interface ResolveState {
   data object Idle : ResolveState
@@ -55,73 +29,39 @@ sealed interface ResolveState {
   ) : ResolveState
 }
 
-@OptIn(ExperimentalCoroutinesApi::class)
+/**
+ * UI state for the single embedded [api] instance. Ketch runs
+ * strictly as a local download manager: there is exactly one
+ * active backend for the lifetime of this state holder.
+ */
 class AppState(
-  val instanceManager: InstanceManager,
+  private val api: KetchApi,
   private val scope: CoroutineScope,
-  private val embeddedAiProvider: AiDiscoveryProvider? = null,
   private val onOpenBrowser: ((String?) -> Unit)? = null,
 ) {
-  private val lanServerDiscovery = LanServerDiscovery()
-
-  val activeApi: StateFlow<KetchApi> =
-    instanceManager.activeApi
-  val activeInstance: StateFlow<InstanceEntry?> =
-    instanceManager.activeInstance
-  val instances: StateFlow<List<InstanceEntry>> =
-    instanceManager.instances
-  val serverState: StateFlow<ServerState> =
-    instanceManager.serverState
-
-  val connectionState: StateFlow<ConnectionState?> =
-    activeInstance.flatMapLatest { instance ->
-      when (instance) {
-        is RemoteInstance -> instance.connectionState
-        else -> MutableStateFlow(null)
-      }
-    }.stateIn(
-      scope,
-      SharingStarted.WhileSubscribed(5000),
-      null
-    )
-
-  val tasks: StateFlow<List<DownloadTask>> =
-    activeApi.flatMapLatest { it.tasks }.stateIn(
-      scope,
-      SharingStarted.WhileSubscribed(5000),
-      emptyList()
-    )
+  val tasks: StateFlow<List<DownloadTask>> = api.tasks
 
   val sortedTasks: StateFlow<List<DownloadTask>> =
     tasks.map { it.sortedByDescending { t -> t.createdAt } }
       .stateIn(
         scope,
         SharingStarted.WhileSubscribed(5000),
-        emptyList()
+        emptyList(),
       )
 
   // UI state
   var statusFilter by mutableStateOf(StatusFilter.All)
   var errorMessage by mutableStateOf<String?>(null)
   var showAddDialog by mutableStateOf(false)
-  var showInstanceSelector by mutableStateOf(false)
-  var showAddRemoteDialog by mutableStateOf(false)
-  var showAiDiscoverDialog by mutableStateOf(false)
-  var aiDiscoverState by mutableStateOf<AiDiscoverState>(
-    AiDiscoverState.Idle
+  var resolveState by mutableStateOf<ResolveState>(
+    ResolveState.Idle
   )
     private set
+  private var resolvingUrl: String? = null
 
-  /**
-   * Handle "New Task" action. If no backend is available,
-   * show the add-remote-server dialog instead.
-   */
+  /** Handle "New Task" action. */
   fun requestAddDownload() {
-    if (activeInstance.value == null) {
-      showAddRemoteDialog = true
-    } else {
-      showAddDialog = true
-    }
+    showAddDialog = true
   }
 
   /**
@@ -138,42 +78,12 @@ class AppState(
     onOpenBrowser.invoke(url)
   }
 
-  var discoveryState by mutableStateOf<DiscoveryState>(
-    DiscoveryState.Idle
-  )
-    private set
-  private var discoveryJob: Job? = null
-  var switchingInstance by
-    mutableStateOf<InstanceEntry?>(null)
-  var unauthorizedInstance by
-    mutableStateOf<RemoteInstance?>(null)
-  var resolveState by mutableStateOf<ResolveState>(
-    ResolveState.Idle
-  )
-    private set
-  private var resolvingUrl: String? = null
-
-  init {
-    scope.launch {
-      connectionState.collect { state ->
-        if (state is ConnectionState.Unauthorized) {
-          val instance =
-            activeInstance.value as? RemoteInstance
-          if (instance != null) {
-            unauthorizedInstance = instance
-            showAddRemoteDialog = true
-          }
-        }
-      }
-    }
-  }
-
   fun resolveUrl(url: String) {
     resolvingUrl = url
     resolveState = ResolveState.Resolving
     scope.launch {
       runCatching {
-        activeApi.value.resolve(url)
+        api.resolve(url)
       }.onSuccess { result ->
         if (resolvingUrl == url) {
           resolveState = ResolveState.Resolved(result)
@@ -215,88 +125,10 @@ class AppState(
           resolvedSource = resolvedUrl,
           selectedFileIds = selectedFileIds,
         )
-        activeApi.value.download(request)
+        api.download(request)
       }.onFailure { e ->
         errorMessage =
           e.message ?: "Failed to start download"
-      }
-    }
-  }
-
-  fun switchInstance(instance: InstanceEntry) {
-    if (instance == activeInstance.value ||
-      switchingInstance != null
-    ) return
-    switchingInstance = instance
-    scope.launch {
-      try {
-        instanceManager.switchTo(instance)
-        showInstanceSelector = false
-      } catch (e: Exception) {
-        errorMessage =
-          "Failed to switch instance: ${e.message}"
-      } finally {
-        switchingInstance = null
-      }
-    }
-  }
-
-  fun addRemoteServer(
-    host: String,
-    port: Int,
-    token: String?,
-  ) {
-    try {
-      instanceManager.addRemote(host, port, token)
-    } catch (e: Exception) {
-      errorMessage =
-        "Failed to add remote server: ${e.message}"
-    }
-  }
-
-  fun discoverRemoteServers(port: Int = 8642) {
-    if (discoveryState is DiscoveryState.Discovering) return
-    discoveryState = DiscoveryState.Discovering()
-    discoveryJob = scope.launch {
-      try {
-        val servers = withContext(Dispatchers.Default) {
-          lanServerDiscovery.discover(port)
-        }
-        discoveryState = DiscoveryState.Finished(servers)
-      } catch (e: Exception) {
-        discoveryState = DiscoveryState.Error(
-          e.message ?: "Failed to discover LAN servers"
-        )
-      }
-    }
-  }
-
-  fun stopDiscovery() {
-    discoveryJob?.cancel()
-    discoveryJob = null
-    val current = discoveryState
-    discoveryState = DiscoveryState.Finished(
-      servers = if (current is DiscoveryState.Discovering) {
-        current.servers
-      } else {
-        emptyList()
-      }
-    )
-  }
-
-  fun resetDiscovery() {
-    discoveryJob?.cancel()
-    discoveryJob = null
-    discoveryState = DiscoveryState.Idle
-  }
-
-  fun removeInstance(instance: InstanceEntry) {
-    scope.launch {
-      try {
-        instanceManager.removeInstance(instance)
-      } catch (e: Exception) {
-        errorMessage =
-          "Failed to remove instance: ${e.message}"
       }
     }
   }
@@ -327,78 +159,6 @@ class AppState(
         }
       }
     }
-  }
-
-  fun reconnectWithToken(
-    instance: RemoteInstance,
-    token: String,
-  ) {
-    unauthorizedInstance = null
-    scope.launch {
-      try {
-        instanceManager.reconnectWithToken(instance, token)
-      } catch (e: Exception) {
-        errorMessage =
-          "Failed to reconnect: ${e.message}"
-      }
-    }
-  }
-
-  fun aiDiscover(query: String, sites: String) {
-    if (embeddedAiProvider == null) {
-      aiDiscoverState = AiDiscoverState.Error(
-        "AI discovery is not available",
-      )
-      return
-    }
-    aiDiscoverState = AiDiscoverState.Loading
-    scope.launch {
-      runCatching {
-        val siteList = sites.split(",", " ")
-          .map { it.trim() }
-          .filter { it.isNotBlank() }
-        embeddedAiProvider.discover(
-          AiDiscoverRequest(
-            query = query,
-            sites = siteList,
-          ),
-        )
-      }.onSuccess { response ->
-        aiDiscoverState = AiDiscoverState.Results(
-          candidates = response.candidates,
-        )
-      }.onFailure { e ->
-        aiDiscoverState = AiDiscoverState.Error(
-          e.message ?: "Discovery failed",
-        )
-      }
-    }
-  }
-
-  fun aiDownloadSelected(candidates: List<AiCandidate>) {
-    showAiDiscoverDialog = false
-    aiDiscoverState = AiDiscoverState.Idle
-    scope.launch {
-      runCatching {
-        val api = activeApi.value
-        candidates.forEach { c ->
-          api.download(
-            DownloadRequest(
-              url = c.url,
-              destination = c.fileName
-                ?.let { Destination(it) },
-            ),
-          )
-        }
-      }.onFailure { e ->
-        errorMessage =
-          e.message ?: "Failed to start AI downloads"
-      }
-    }
-  }
-
-  fun resetAiDiscover() {
-    aiDiscoverState = AiDiscoverState.Idle
   }
 
   fun dismissError() {

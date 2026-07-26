@@ -10,12 +10,10 @@ plugins {
 dependencies {
   implementation(projects.config)
   implementation(projects.app.shared)
-  implementation(projects.ai.discover)
   implementation(projects.library.core)
   implementation(projects.library.ktor)
   implementation(projects.library.ftp)
   implementation(projects.library.torrent)
-  implementation(projects.library.server)
   implementation(projects.library.sqlite)
   implementation(compose.desktop.currentOs)
   implementation(libs.kotlinx.coroutinesSwing)
@@ -34,7 +32,6 @@ compose.desktop {
         project(":library:ftp").file("consumer-rules.pro"),
         project(":library:ktor").file("consumer-rules.pro"),
         project(":library:sqlite").file("consumer-rules.pro"),
-        project(":library:remote").file("consumer-rules.pro"),
       )
     }
 
