@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.net.Uri
 import android.net.http.SslError
+import android.os.Handler
+import android.os.Looper
 import android.os.Message
 import android.webkit.PermissionRequest
 import android.webkit.SslErrorHandler
@@ -94,6 +96,9 @@ internal fun browserWebViewClient(
   }
 }
 
+/** Grace period before a never-navigated `onCreateWindow` transport WebView is force-destroyed. */
+private const val TRANSPORT_WINDOW_TIMEOUT_MS = 5_000L
+
 /**
  * Builds the [WebChromeClient] for [tab].
  *
@@ -141,18 +146,37 @@ internal fun browserWebChromeClient(
     isUserGesture: Boolean,
     resultMsg: Message,
   ): Boolean {
-    val transport = WebView(view.context)
+    val transport = WebView(view.context).apply {
+      // Mirrors the opener's JS setting: some popups compute their
+      // target URL via script rather than passing one to window.open
+      // directly, and need scripting on to ever navigate at all.
+      settings.javaScriptEnabled = view.settings.javaScriptEnabled
+    }
+    val timeoutHandler = Handler(Looper.getMainLooper())
+    var destroyed = false
+    fun destroyTransport() {
+      if (destroyed) return
+      destroyed = true
+      timeoutHandler.removeCallbacksAndMessages(null)
+      transport.stopLoading()
+      transport.webViewClient = object : WebViewClient() {}
+      transport.post { transport.destroy() }
+    }
     transport.webViewClient = object : WebViewClient() {
       override fun shouldOverrideUrlLoading(
         v: WebView,
         request: WebResourceRequest,
       ): Boolean {
         onOpenInNewTab(request.url.toString())
-        v.stopLoading()
-        v.post { v.destroy() }
+        destroyTransport()
         return true
       }
     }
+    // Safety net: a popup that never navigates (e.g. one that only
+    // ever does document.write into itself) would otherwise leak this
+    // transport WebView, and its native Chromium resources, for as
+    // long as the tab stays open.
+    timeoutHandler.postDelayed(::destroyTransport, TRANSPORT_WINDOW_TIMEOUT_MS)
     (resultMsg.obj as WebView.WebViewTransport).webView = transport
     resultMsg.sendToTarget()
     return true

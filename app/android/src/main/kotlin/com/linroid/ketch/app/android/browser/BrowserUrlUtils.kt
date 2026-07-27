@@ -1,5 +1,7 @@
 package com.linroid.ketch.app.android.browser
 
+import android.content.Context
+import android.webkit.WebSettings
 import com.linroid.ketch.api.log.KetchLogger
 import java.net.URI
 import java.net.URLEncoder
@@ -16,6 +18,24 @@ internal val log = KetchLogger("Browser")
 internal const val DESKTOP_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
     "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+
+/** Matches the "; wv)" token Android appends to the default WebView UA. */
+private val WEBVIEW_UA_MARKER = Regex(";\\s*wv\\)")
+
+/**
+ * Effective user agent for [desktopMode]. Mobile mode takes the
+ * system's own default WebView UA and strips the "; wv)" marker:
+ * Chrome for Android never sends that token, but WebView does by
+ * default, and enough sites branch on its presence to serve a
+ * reduced/different layout to embedded WebViews -- so left alone,
+ * identical URLs can render or behave differently here than in Chrome.
+ */
+internal fun userAgentFor(context: Context, desktopMode: Boolean): String =
+  if (desktopMode) {
+    DESKTOP_USER_AGENT
+  } else {
+    WEBVIEW_UA_MARKER.replace(WebSettings.getDefaultUserAgent(context), ")")
+  }
 
 private const val SEARCH_URL_PREFIX = "https://www.google.com/search?q="
 

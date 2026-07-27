@@ -353,9 +353,10 @@ internal fun BrowserRoot(
       onToggleDesktopMode = {
         browserState.activeTab?.let { tab ->
           tab.desktopMode = !tab.desktopMode
-          liveWebView?.settings?.userAgentString =
-            if (tab.desktopMode) DESKTOP_USER_AGENT else null
-          liveWebView?.reload()
+          liveWebView?.let { webView ->
+            webView.settings.userAgentString = userAgentFor(webView.context, tab.desktopMode)
+            webView.reload()
+          }
         }
       },
       onToggleJavaScript = { browserState.javaScriptEnabled = !browserState.javaScriptEnabled },
@@ -556,7 +557,7 @@ private fun WebViewHost(
     factory = { ctx ->
       WebView(ctx).apply {
         configureWebViewSettings(this, javaScriptEnabled, darkTheme)
-        settings.userAgentString = if (tab.desktopMode) DESKTOP_USER_AGENT else null
+        settings.userAgentString = userAgentFor(ctx, tab.desktopMode)
         webViewClient = browserWebViewClient(
           tab = tab,
           onLaunchExternal = onLaunchExternal,
