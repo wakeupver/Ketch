@@ -556,7 +556,7 @@ private fun WebViewHost(
     modifier = modifier,
     factory = { ctx ->
       WebView(ctx).apply {
-        configureWebViewSettings(this, javaScriptEnabled, darkTheme)
+        configureWebViewSettings(this, javaScriptEnabled, darkTheme, tab.desktopMode)
         settings.userAgentString = userAgentFor(ctx, tab.desktopMode)
         webViewClient = browserWebViewClient(
           tab = tab,
@@ -578,6 +578,7 @@ private fun WebViewHost(
     },
     update = { webView ->
       webView.settings.javaScriptEnabled = javaScriptEnabled
+      webView.settings.loadWithOverviewMode = tab.desktopMode
       applyAlgorithmicDarkening(webView.settings, darkTheme)
     },
     onRelease = { webView ->
@@ -596,7 +597,12 @@ private fun WebViewHost(
 }
 
 @SuppressLint("SetJavaScriptEnabled")
-private fun configureWebViewSettings(webView: WebView, javaScriptEnabled: Boolean, darkTheme: Boolean) {
+private fun configureWebViewSettings(
+  webView: WebView,
+  javaScriptEnabled: Boolean,
+  darkTheme: Boolean,
+  desktopMode: Boolean,
+) {
   val settings = webView.settings
   settings.javaScriptEnabled = javaScriptEnabled
   settings.domStorageEnabled = true
@@ -605,8 +611,17 @@ private fun configureWebViewSettings(webView: WebView, javaScriptEnabled: Boolea
   settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
   settings.allowFileAccess = false
   settings.allowContentAccess = false
-  settings.loadWithOverviewMode = true
+  // useWideViewPort lets WebView honor a page's own viewport meta tag,
+  // same as Chrome. loadWithOverviewMode additionally force-zooms the
+  // whole page to fit the screen width -- correct for desktop-mode
+  // (deliberately wider than the screen) but wrong for a compliant
+  // mobile viewport: it scales the page away from its native 1:1
+  // layout, which is enough to make viewport-relative overlays (menus,
+  // dropdowns sized off window.innerWidth/vh units) render at a
+  // different effective size/position than they do in Chrome for the
+  // exact same URL.
   settings.useWideViewPort = true
+  settings.loadWithOverviewMode = desktopMode
   settings.builtInZoomControls = true
   settings.displayZoomControls = false
   settings.cacheMode = WebSettings.LOAD_DEFAULT
