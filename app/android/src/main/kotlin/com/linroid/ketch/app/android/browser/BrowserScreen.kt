@@ -18,6 +18,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -545,11 +546,16 @@ private fun WebViewHost(
   onDownload: (url: String, userAgent: String) -> Unit,
   modifier: Modifier = Modifier,
 ) {
+  // Mirrors KetchTheme's own light/dark decision so WebView's forced
+  // darkening below only ever engages when the surrounding UI is
+  // actually dark, never against a light-themed app/system state.
+  val darkTheme = isSystemInDarkTheme()
+
   AndroidView(
     modifier = modifier,
     factory = { ctx ->
       WebView(ctx).apply {
-        configureWebViewSettings(this, javaScriptEnabled)
+        configureWebViewSettings(this, javaScriptEnabled, darkTheme)
         settings.userAgentString = if (tab.desktopMode) DESKTOP_USER_AGENT else null
         webViewClient = browserWebViewClient(
           tab = tab,
@@ -569,7 +575,10 @@ private fun WebViewHost(
         onCreated(this)
       }
     },
-    update = { webView -> webView.settings.javaScriptEnabled = javaScriptEnabled },
+    update = { webView ->
+      webView.settings.javaScriptEnabled = javaScriptEnabled
+      applyAlgorithmicDarkening(webView.settings, darkTheme)
+    },
     onRelease = { webView ->
       val bundle = Bundle()
       webView.saveState(bundle)
@@ -586,7 +595,7 @@ private fun WebViewHost(
 }
 
 @SuppressLint("SetJavaScriptEnabled")
-private fun configureWebViewSettings(webView: WebView, javaScriptEnabled: Boolean) {
+private fun configureWebViewSettings(webView: WebView, javaScriptEnabled: Boolean, darkTheme: Boolean) {
   val settings = webView.settings
   settings.javaScriptEnabled = javaScriptEnabled
   settings.domStorageEnabled = true
@@ -604,11 +613,25 @@ private fun configureWebViewSettings(webView: WebView, javaScriptEnabled: Boolea
   if (WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_ENABLE)) {
     WebSettingsCompat.setSafeBrowsingEnabled(settings, true)
   }
-  if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
-    WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, true)
-  }
-  CookieManager.getInstance().setAcceptCookie(true)
+  applyAlgorithmicDarkening(settings, darkTheme)
+  // setAcceptCookie is a process-wide CookieManager flag already set once in
+  // BrowserActivity.onCreate; repeating it per WebView (this fn runs on every
+  // new tab) is redundant work with zero added effect.
   CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+}
+
+/**
+ * Applies WebView's forced/algorithmic darkening only when [darkTheme]
+ * is true. Enabling it unconditionally is the classic WebView pitfall
+ * that breaks rendering across many sites: the engine algorithmically
+ * inverts colors on any page lacking its own `prefers-color-scheme`
+ * support -- most of the web -- producing washed-out or illegible
+ * pages even while the app itself is in light mode.
+ */
+private fun applyAlgorithmicDarkening(settings: WebSettings, darkTheme: Boolean) {
+  if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+    WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, darkTheme)
+  }
 }
 
 @Composable
